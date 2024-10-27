@@ -184,7 +184,7 @@ func (e *Emulator) executeOpcode(opcode Opcode) {
 		e.pc += 2
 	case 0x9:
 		switch opcode.N() {
-		case 0xE: // 9xy0: skip instruction if Vx != Vy
+		case 0x0: // 9xy0: skip instruction if Vx != Vy
 			e.pc += stlval.Ternary[uint16](e.getVX(opcode) != e.getVY(opcode), 4, 2)
 		default:
 			panic(fmt.Sprintf("Unknown opcode: 0x%04X", opcode))
@@ -271,13 +271,11 @@ func (e *Emulator) executeOpcode(opcode Opcode) {
 			for i := range opcode.X() + 1 {
 				e.memory[e.i+uint16(i)] = e.v[i]
 			}
-			e.i += uint16(opcode.X()) + 1
 			e.pc += 2
 		case 0x65:
 			for i := range opcode.X() + 1 {
 				e.v[i] = e.memory[e.i+uint16(i)]
 			}
-			e.i += uint16(opcode.X()) + 1
 			e.pc += 2
 		default:
 			panic(fmt.Sprintf("Unknown opcode: 0x%04X", opcode))
