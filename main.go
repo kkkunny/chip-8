@@ -6,6 +6,7 @@ import (
 	"fyne.io/fyne/v2"
 	fyneApp "fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
+	"fyne.io/fyne/v2/dialog"
 	stlerr "github.com/kkkunny/stl/error"
 
 	hook "github.com/robotn/gohook"
@@ -17,6 +18,7 @@ type EmulatorApp struct {
 	app      fyne.App
 	window   fyne.Window
 	screen   *canvas.Image
+	loadChan chan string
 	emulator *emulator.Emulator
 }
 
@@ -33,16 +35,24 @@ func NewEmulatorApp() *EmulatorApp {
 	sc := canvas.NewImageFromImage(img)
 	sc.FillMode = canvas.ImageFillOriginal
 	window.SetContent(sc)
-	return &EmulatorApp{
+	eapp := &EmulatorApp{
 		app:      app,
 		window:   window,
 		screen:   sc,
+		loadChan: make(chan string, 1),
 		emulator: e,
 	}
-}
 
-func (app *EmulatorApp) LoadGame(path string) error {
-	return app.emulator.LoadGame(path)
+	window.SetMainMenu(fyne.NewMainMenu(fyne.NewMenu("菜单", fyne.NewMenuItem("载入游戏", func() {
+		selectFileWindow := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
+			if err != nil {
+				panic(err)
+			}
+			eapp.loadChan <- reader.URI().Path()
+		}, window)
+		selectFileWindow.Show()
+	}))))
+	return eapp
 }
 
 func (app *EmulatorApp) Run() {
@@ -64,10 +74,21 @@ func (app *EmulatorApp) Run() {
 	}()
 
 	go func() {
+		var gaming bool
 		for {
-			app.emulator.Run()
-			app.emulator.Draw()
-			app.screen.Refresh()
+			select {
+			case path := <-app.loadChan:
+				app.emulator.Reset()
+				stlerr.Must(app.emulator.LoadGame(path))
+				gaming = true
+			default:
+				if !gaming {
+					break
+				}
+				app.emulator.Run()
+				app.emulator.Draw()
+				app.screen.Refresh()
+			}
 		}
 	}()
 
@@ -76,6 +97,5 @@ func (app *EmulatorApp) Run() {
 
 func main() {
 	app := NewEmulatorApp()
-	stlerr.Must(app.LoadGame("roms/BRIX.ch8"))
 	app.Run()
 }

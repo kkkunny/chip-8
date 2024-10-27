@@ -69,12 +69,10 @@ type Emulator struct {
 }
 
 func NewEmulator(img image.Image) *Emulator {
-	emulator := &Emulator{
+	return &Emulator{
 		img:   img,
 		audio: newAudio(),
 	}
-	emulator.Reset()
-	return emulator
 }
 
 func (e *Emulator) Reset() {
