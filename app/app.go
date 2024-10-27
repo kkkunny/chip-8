@@ -14,6 +14,7 @@ import (
 	hook "github.com/robotn/gohook"
 	"golang.org/x/image/draw"
 
+	"github.com/kkkunny/chip-8/config"
 	"github.com/kkkunny/chip-8/os"
 )
 
@@ -120,19 +121,27 @@ func (app *App) listenKeyboard() {
 
 func (app *App) mainLoop() {
 	var gaming bool
+	var cycles int
 	for {
 		select {
 		case path := <-app.loadChan:
 			app.cpu.Reset()
 			stlerr.Must(app.cpu.Load(path))
 			gaming = true
+			cycles = 0
 		default:
 			if !gaming {
+				time.Sleep(time.Second)
 				break
 			}
-			time.Sleep(time.Second / 200)
 			app.cpu.Next()
 			app.screen.Refresh()
+			cycles += 1
+			time.Sleep(time.Second / config.CLOCK_SPEED)
+			if cycles >= config.CLOCK_SPEED/config.TIMER_SPEED {
+				cycles = 0
+				app.cpu.Ticker()
+			}
 		}
 	}
 }

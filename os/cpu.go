@@ -221,8 +221,11 @@ func (e *CPU) executeOpcode(opcode opcode) {
 }
 
 func (e *CPU) Next() {
-	e.executeOpcode(newOpcode(e.memory.Get(uint(e.pc)), e.memory.Get(uint(e.pc)+1)))
+	op := newOpcode(e.memory.Get(uint(e.pc)), e.memory.Get(uint(e.pc)+1))
+	e.executeOpcode(op)
+}
 
+func (e *CPU) Ticker() {
 	if e.delayTimer > 0 {
 		e.delayTimer -= 1
 	}
