@@ -6,14 +6,9 @@ import (
 	"image/color"
 	rand2 "math/rand/v2"
 	"os"
-	"sync"
 	"time"
 
-	"github.com/gopxl/beep"
-	"github.com/gopxl/beep/mp3"
-	"github.com/gopxl/beep/speaker"
 	"github.com/kkkunny/stl/container/stack"
-	stlerr "github.com/kkkunny/stl/error"
 	stlval "github.com/kkkunny/stl/value"
 	"golang.org/x/exp/rand"
 	"golang.org/x/image/draw"
@@ -58,9 +53,6 @@ var KeyMap = map[uint16]uint8{
 	86:  15, // v
 }
 
-var beepLock sync.Mutex
-var beepAudio beep.StreamSeekCloser
-
 type Emulator struct {
 	memory     [4096]uint8 // 内存 4K
 	v          [16]uint8   // 16个寄存器
@@ -71,12 +63,16 @@ type Emulator struct {
 	stack      stack.Stack[uint16] // 栈
 	gfx        [64][32]bool        // 屏幕
 	keyboards  [16]bool            // 键盘
+	audio      *Audio
 
 	img image.Image
 }
 
 func NewEmulator(img image.Image) *Emulator {
-	emulator := &Emulator{img: img}
+	emulator := &Emulator{
+		img:   img,
+		audio: newAudio(),
+	}
 	emulator.Reset()
 	return emulator
 }
@@ -302,17 +298,7 @@ func (e *Emulator) Run() {
 	}
 	if e.soundTimer > 0 {
 		if e.soundTimer == 1 {
-			go func() {
-				beepLock.Lock()
-				defer beepLock.Unlock()
-
-				done := make(chan struct{})
-				speaker.Play(beep.Seq(beepAudio, beep.Callback(func() {
-					done <- struct{}{}
-				})))
-				<-done
-				stlerr.Must(beepAudio.Seek(0))
-			}()
+			e.audio.Play()
 		}
 		e.soundTimer -= 1
 	}
@@ -330,11 +316,4 @@ func (e *Emulator) Draw() {
 			}
 		}
 	}
-}
-
-func init() {
-	beepFile := stlerr.MustWith(os.Open("beep.mp3"))
-	streamer, format := stlerr.MustWith2(mp3.Decode(beepFile))
-	stlerr.Must(speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10)))
-	beepAudio = streamer
 }

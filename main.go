@@ -6,13 +6,21 @@ import (
 	"fyne.io/fyne/v2"
 	fyneApp "fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
+	stlerr "github.com/kkkunny/stl/error"
 
 	hook "github.com/robotn/gohook"
 
 	"github.com/kkkunny/chip-8/emulator"
 )
 
-func main() {
+type EmulatorApp struct {
+	app      fyne.App
+	window   fyne.Window
+	screen   *canvas.Image
+	emulator *emulator.Emulator
+}
+
+func NewEmulatorApp() *EmulatorApp {
 	app := fyneApp.New()
 	window := app.NewWindow("Chip-8 Emulator")
 	window.Resize(fyne.NewSize(640, 320))
@@ -20,28 +28,36 @@ func main() {
 	window.CenterOnScreen()
 
 	img := image.NewRGBA(image.Rect(0, 0, 640, 320))
-	chip8 := emulator.NewEmulator(img)
-	err := chip8.LoadGame("roms/BRIX")
-	if err != nil {
-		panic(err)
-	}
+	e := emulator.NewEmulator(img)
 
 	sc := canvas.NewImageFromImage(img)
 	sc.FillMode = canvas.ImageFillOriginal
 	window.SetContent(sc)
+	return &EmulatorApp{
+		app:      app,
+		window:   window,
+		screen:   sc,
+		emulator: e,
+	}
+}
 
+func (app *EmulatorApp) LoadGame(path string) error {
+	return app.emulator.LoadGame(path)
+}
+
+func (app *EmulatorApp) Run() {
 	go func() {
 		for key := range hook.Start() {
 			switch key.Rawcode {
 			case 27:
-				app.Quit()
+				app.app.Quit()
 				return
 			default:
 				switch key.Kind {
 				case hook.KeyDown:
-					chip8.KeyDown(key.Rawcode)
+					app.emulator.KeyDown(key.Rawcode)
 				case hook.KeyUp:
-					chip8.KeyUp(key.Rawcode)
+					app.emulator.KeyUp(key.Rawcode)
 				}
 			}
 		}
@@ -49,11 +65,17 @@ func main() {
 
 	go func() {
 		for {
-			chip8.Run()
-			chip8.Draw()
-			sc.Refresh()
+			app.emulator.Run()
+			app.emulator.Draw()
+			app.screen.Refresh()
 		}
 	}()
 
-	window.ShowAndRun()
+	app.window.ShowAndRun()
+}
+
+func main() {
+	app := NewEmulatorApp()
+	stlerr.Must(app.LoadGame("roms/BRIX.ch8"))
+	app.Run()
 }
