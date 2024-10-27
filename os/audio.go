@@ -1,4 +1,4 @@
-package emulator
+package os
 
 import (
 	"os"
@@ -9,6 +9,8 @@ import (
 	"github.com/gopxl/beep/mp3"
 	"github.com/gopxl/beep/speaker"
 	stlerr "github.com/kkkunny/stl/error"
+
+	"github.com/kkkunny/chip-8/config"
 )
 
 var beepAudio beep.StreamSeekCloser
@@ -20,20 +22,22 @@ func init() {
 	beepAudio = streamer
 }
 
-type Audio struct {
+type audio struct {
 	lock sync.Locker
 }
 
-func newAudio() *Audio {
-	return &Audio{
+func newAudio() *audio {
+	return &audio{
 		lock: &sync.Mutex{},
 	}
 }
 
-func (a *Audio) Play() {
+func (a *audio) Play() {
 	go func() {
 		a.lock.Lock()
 		defer a.lock.Unlock()
+
+		config.Logger.Debug("play audio")
 
 		done := make(chan struct{})
 		speaker.Play(beep.Seq(beepAudio, beep.Callback(func() {
