@@ -6,9 +6,14 @@ import (
 	"image/color"
 	rand2 "math/rand/v2"
 	"os"
+	"sync"
 	"time"
 
+	"github.com/gopxl/beep"
+	"github.com/gopxl/beep/mp3"
+	"github.com/gopxl/beep/speaker"
 	"github.com/kkkunny/stl/container/stack"
+	stlerr "github.com/kkkunny/stl/error"
 	stlval "github.com/kkkunny/stl/value"
 	"golang.org/x/exp/rand"
 	"golang.org/x/image/draw"
@@ -52,6 +57,9 @@ var KeyMap = map[uint16]uint8{
 	67:  14, // c
 	86:  15, // v
 }
+
+var beepLock sync.Mutex
+var beepAudio beep.StreamSeekCloser
 
 type Emulator struct {
 	memory     [4096]uint8 // 内存 4K
@@ -123,7 +131,6 @@ func (e *Emulator) LoadGame(path string) error {
 }
 
 func (e *Emulator) executeOpcode(opcode Opcode) {
-	fmt.Printf("0x%04X\n", opcode)
 	switch opcode.Op() {
 	case 0x0:
 		switch opcode.N() {
@@ -288,7 +295,6 @@ func (e *Emulator) executeOpcode(opcode Opcode) {
 
 func (e *Emulator) Run() {
 	opcode := NewOpcode(e.memory[e.pc], e.memory[e.pc+1])
-	// fmt.Printf("Opcode: 0x%04X\n", opcode)
 	e.executeOpcode(opcode)
 
 	if e.delayTimer > 0 {
@@ -296,7 +302,17 @@ func (e *Emulator) Run() {
 	}
 	if e.soundTimer > 0 {
 		if e.soundTimer == 1 {
-			fmt.Println("BEEP!")
+			go func() {
+				beepLock.Lock()
+				defer beepLock.Unlock()
+
+				done := make(chan struct{})
+				speaker.Play(beep.Seq(beepAudio, beep.Callback(func() {
+					done <- struct{}{}
+				})))
+				<-done
+				stlerr.Must(beepAudio.Seek(0))
+			}()
 		}
 		e.soundTimer -= 1
 	}
@@ -314,4 +330,11 @@ func (e *Emulator) Draw() {
 			}
 		}
 	}
+}
+
+func init() {
+	beepFile := stlerr.MustWith(os.Open("beep.mp3"))
+	streamer, format := stlerr.MustWith2(mp3.Decode(beepFile))
+	stlerr.Must(speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10)))
+	beepAudio = streamer
 }
