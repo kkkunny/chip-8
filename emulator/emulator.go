@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	rand2 "math/rand/v2"
 	"os"
+	"time"
 
 	"github.com/kkkunny/stl/container/stack"
 	stlval "github.com/kkkunny/stl/value"
+	"golang.org/x/exp/rand"
 	"golang.org/x/image/draw"
 )
 
@@ -31,6 +34,25 @@ var fontset = [80]uint8{
 	0xF0, 0x80, 0xF0, 0x80, 0x80, // F
 }
 
+var KeyMap = map[uint16]uint8{
+	'1': 0,
+	'2': 1,
+	'3': 2,
+	'4': 3,
+	81:  4,  // q
+	87:  5,  // w
+	69:  6,  // e
+	82:  7,  // r
+	65:  8,  // a
+	83:  9,  // s
+	68:  10, // d
+	70:  11, // f
+	90:  12, // z
+	88:  13, // x
+	67:  14, // c
+	86:  15, // v
+}
+
 type Emulator struct {
 	memory     [4096]uint8 // 内存 4K
 	v          [16]uint8   // 16个寄存器
@@ -40,7 +62,9 @@ type Emulator struct {
 	soundTimer uint8
 	stack      stack.Stack[uint16] // 栈
 	gfx        [64][32]bool        // 屏幕
-	img        image.Image
+	keyboards  [16]bool            // 键盘
+
+	img image.Image
 }
 
 func NewEmulator(img image.Image) *Emulator {
@@ -59,12 +83,28 @@ func (e *Emulator) Reset() {
 	e.soundTimer = 0
 	e.stack = stack.New[uint16]()
 	e.gfx = [64][32]bool{}
+	e.keyboards = [16]bool{}
 	draw.Draw(e.img.(draw.Image), e.img.Bounds(), &image.Uniform{C: color.RGBA{R: 0, G: 0, B: 0, A: 255}}, image.ZP, draw.Src)
 }
 
 func (e *Emulator) getVX(opcode Opcode) uint8    { return e.v[opcode.X()] }
 func (e *Emulator) getVY(opcode Opcode) uint8    { return e.v[opcode.Y()] }
 func (e *Emulator) setVX(opcode Opcode, x uint8) { e.v[opcode.X()] = x }
+func (e *Emulator) setCarry(carry bool)          { e.v[0xF] = stlval.Ternary[uint8](carry, 1, 0) }
+func (e *Emulator) KeyDown(key uint16) {
+	index, ok := KeyMap[key]
+	if !ok {
+		return
+	}
+	e.keyboards[index] = true
+}
+func (e *Emulator) KeyUp(key uint16) {
+	index, ok := KeyMap[key]
+	if !ok {
+		return
+	}
+	e.keyboards[index] = false
+}
 
 func (e *Emulator) LoadGame(path string) error {
 	info, err := os.Stat(path)
@@ -83,68 +123,160 @@ func (e *Emulator) LoadGame(path string) error {
 }
 
 func (e *Emulator) executeOpcode(opcode Opcode) {
+	fmt.Printf("0x%04X\n", opcode)
 	switch opcode.Op() {
 	case 0x0:
 		switch opcode.N() {
-		case 0x0:
+		case 0x0: // 0x00E0: clear the screen
 			e.gfx = [64][32]bool{}
 			e.pc += 2
-		case 0xE:
+		case 0xE: // 0x00EE: ret
 			e.pc = e.stack.Pop()
 		default:
 			panic(fmt.Sprintf("Unknown opcode: 0x%04X", opcode))
 		}
-	case 0x1:
+	case 0x1: // 1nnn: jump to address nnn
 		e.pc = opcode.NNN()
-	case 0x2:
-		e.stack.Push(e.pc)
+	case 0x2: // 2nnn: call address nnn
+		e.stack.Push(e.pc + 2)
 		e.pc = opcode.NNN()
-	case 0x6:
+	case 0x3: // 3xkk: skip next instr if V[x] = kk
+		e.pc += stlval.Ternary[uint16](e.getVX(opcode) == opcode.NN(), 4, 2)
+	case 0x4: // 4xkk: skip next instr if V[x] != kk
+		e.pc += stlval.Ternary[uint16](e.getVX(opcode) != opcode.NN(), 4, 2)
+	case 0x5: // 5xy0: skip next instr if V[x] == V[y]
+		e.pc += stlval.Ternary[uint16](e.getVX(opcode) == e.getVY(opcode), 4, 2)
+	case 0x6: // 6xkk: set V[x] = kk
 		e.setVX(opcode, opcode.NN())
 		e.pc += 2
-	case 0x7:
+	case 0x7: // 7xkk: set V[x] = V[x] + kk
 		e.setVX(opcode, e.getVX(opcode)+opcode.NN())
 		e.pc += 2
-	case 0x8:
+	case 0x8: // 8xyn: Arithmetic stuff
 		switch opcode.N() {
-		case 0x4:
-			if e.getVX(opcode) < e.getVY(opcode) {
-				e.v[0xF] = 1
-			} else {
-				e.v[0xF] = 0
-			}
+		case 0x0: // Set vy
+			e.setVX(opcode, e.getVY(opcode))
+		case 0x1: // OR
+			e.setVX(opcode, e.getVX(opcode)|e.getVY(opcode))
+		case 0x2: // AND
+			e.setVX(opcode, e.getVX(opcode)&e.getVY(opcode))
+		case 0x3: // XOR
+			e.setVX(opcode, e.getVX(opcode)^e.getVY(opcode))
+		case 0x4: // Add vy
+			e.setCarry((uint16(e.getVX(opcode)) + uint16(e.getVY(opcode))) > 255)
 			e.setVX(opcode, e.getVX(opcode)+e.getVY(opcode))
-			e.pc += 2
+		case 0x5: // Sub vy
+			e.setCarry(e.getVX(opcode) > e.getVY(opcode))
+			e.setVX(opcode, e.getVX(opcode)-e.getVY(opcode))
+		case 0x6: // Shift right
+			e.setCarry(e.getVX(opcode)&0x01 != 0)
+			e.setVX(opcode, e.getVX(opcode)>>1)
+		case 0x7: // Sub from vy
+			e.setCarry(e.getVX(opcode) < e.getVY(opcode))
+			e.setVX(opcode, e.getVY(opcode)-e.getVX(opcode))
+		case 0xE: // Shift left
+			e.setCarry((e.getVX(opcode)>>7)&0x01 != 0)
+			e.setVX(opcode, e.getVX(opcode)<<1)
 		default:
 			panic(fmt.Sprintf("Unknown opcode: 0x%04X", opcode))
 		}
-	case 0xA:
+		e.pc += 2
+	case 0x9:
+		switch opcode.N() {
+		case 0xE: // 9xy0: skip instruction if Vx != Vy
+			e.pc += stlval.Ternary[uint16](e.getVX(opcode) != e.getVY(opcode), 4, 2)
+		default:
+			panic(fmt.Sprintf("Unknown opcode: 0x%04X", opcode))
+		}
+	case 0xA: // Annn: set I to address nnn
 		e.i = opcode.NNN()
 		e.pc += 2
+	case 0xB: // Bnnn: jump to location nnn + V[0]
+		e.pc = opcode.NNN() + uint16(e.v[0])
+	case 0xC: // Cxkk: V[x] = random byte AND kk
+		val := uint8(rand2.New(rand.NewSource(uint64(time.Now().Unix()))).UintN(256))
+		e.setVX(opcode, val&opcode.NN())
+		e.pc += 2
 	case 0xD:
-		startX, startY := uint16(e.getVX(opcode))%64, uint16(e.getVY(opcode))%32
-		z := uint16(opcode.N())
+		// Dxyn: Display an n-byte sprite starting at memory
+		// location I at (Vx, Vy) on the screen, VF = collision
+		e.setCarry(false)
+		var collision bool
 
-		e.v[0xF] = 0
-
-		for row := range z {
-			y := startY + row
-			sprite := uint16(e.memory[e.i+row])
-			for col := range uint16(8) {
-				x := startX + col
-				oldPixel := &e.gfx[x][y]
-				newPixel := (sprite & (1 << (7 - col))) != 0
-				*oldPixel = *oldPixel != newPixel
+		for j := range uint16(opcode.N()) {
+			row := uint16(e.memory[e.i+j])
+			for i := range uint16(8) {
+				newPixel := (row >> (7 - i) & 0x01) != 0
+				if newPixel {
+					xi, yj := (uint16(e.getVX(opcode))+i)%64, (uint16(e.getVY(opcode))+j)%32
+					oldPixel := &e.gfx[xi][yj]
+					if *oldPixel {
+						collision = true
+					}
+					*oldPixel = newPixel != *oldPixel
+				}
 			}
 		}
 
+		e.setCarry(collision)
 		e.pc += 2
-	case 0xF:
+	case 0xE: // key-pressed events
 		switch opcode.NN() {
+		case 0x9E: // skip next instr if key[Vx] is pressed
+			e.pc += stlval.Ternary[uint16](e.keyboards[e.getVX(opcode)], 4, 2)
+		case 0xA1: // skip next instr if key[Vx] is not pressed
+			e.pc += stlval.Ternary[uint16](!e.keyboards[e.getVX(opcode)], 4, 2)
+		default:
+			panic(fmt.Sprintf("Unknown opcode: 0x%04X", opcode))
+		}
+	case 0xF: // misc
+		switch opcode.NN() {
+		case 0x07:
+			e.setVX(opcode, e.delayTimer)
+			e.pc += 2
+		case 0x0A:
+			var isPressed bool
+
+			for i, pressed := range e.keyboards {
+				if pressed {
+					isPressed = true
+					e.setVX(opcode, uint8(i))
+					break
+				}
+			}
+
+			if isPressed {
+				e.pc += 2
+			}
+		case 0x15:
+			e.delayTimer = e.getVX(opcode)
+			e.pc += 2
+		case 0x18:
+			e.soundTimer = e.getVX(opcode)
+			e.pc += 2
+		case 0x1E:
+			e.setCarry(e.i+uint16(e.getVX(opcode)) > 0x0FFF)
+			e.i += uint16(e.getVX(opcode))
+			e.pc += 2
+		case 0x29:
+			e.i = 5 * uint16(e.getVX(opcode))
+			e.pc += 2
 		case 0x33:
 			e.memory[e.i] = e.getVX(opcode) / 100
 			e.memory[e.i+1] = (e.getVX(opcode) % 100) / 10
 			e.memory[e.i+2] = e.getVX(opcode) % 10
+			e.pc += 2
+		case 0x55:
+			for i := range opcode.X() + 1 {
+				e.memory[e.i+uint16(i)] = e.v[i]
+			}
+			e.i += uint16(opcode.X()) + 1
+			e.pc += 2
+		case 0x65:
+			for i := range opcode.X() + 1 {
+				e.v[i] = e.memory[e.i+uint16(i)]
+			}
+			e.i += uint16(opcode.X()) + 1
 			e.pc += 2
 		default:
 			panic(fmt.Sprintf("Unknown opcode: 0x%04X", opcode))
@@ -156,7 +288,7 @@ func (e *Emulator) executeOpcode(opcode Opcode) {
 
 func (e *Emulator) Run() {
 	opcode := NewOpcode(e.memory[e.pc], e.memory[e.pc+1])
-	fmt.Printf("Opcode: 0x%04X\n", opcode)
+	// fmt.Printf("Opcode: 0x%04X\n", opcode)
 	e.executeOpcode(opcode)
 
 	if e.delayTimer > 0 {

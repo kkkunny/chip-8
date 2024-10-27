@@ -2,11 +2,12 @@ package main
 
 import (
 	"image"
-	"time"
 
 	"fyne.io/fyne/v2"
 	fyneApp "fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
+
+	hook "github.com/robotn/gohook"
 
 	"github.com/kkkunny/chip-8/emulator"
 )
@@ -16,10 +17,11 @@ func main() {
 	window := app.NewWindow("Chip-8 Emulator")
 	window.Resize(fyne.NewSize(640, 320))
 	window.SetFixedSize(true)
+	window.CenterOnScreen()
 
 	img := image.NewRGBA(image.Rect(0, 0, 640, 320))
 	chip8 := emulator.NewEmulator(img)
-	err := chip8.LoadGame("roms/ibm_logo.ch8")
+	err := chip8.LoadGame("roms/BRIX")
 	if err != nil {
 		panic(err)
 	}
@@ -28,20 +30,28 @@ func main() {
 	sc.FillMode = canvas.ImageFillOriginal
 	window.SetContent(sc)
 
-	frameDuration := time.Second / 60
+	go func() {
+		for key := range hook.Start() {
+			switch key.Rawcode {
+			case 27:
+				app.Quit()
+				return
+			default:
+				switch key.Kind {
+				case hook.KeyDown:
+					chip8.KeyDown(key.Rawcode)
+				case hook.KeyUp:
+					chip8.KeyUp(key.Rawcode)
+				}
+			}
+		}
+	}()
+
 	go func() {
 		for {
-			start := time.Now()
-
 			chip8.Run()
 			chip8.Draw()
 			sc.Refresh()
-
-			elapsed := time.Since(start)
-			sleepDuration := frameDuration - elapsed
-			if sleepDuration > 0 {
-				time.Sleep(sleepDuration)
-			}
 		}
 	}()
 
